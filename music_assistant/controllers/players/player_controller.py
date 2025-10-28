@@ -454,6 +454,7 @@ class PlayerController(CoreController):
 
         Resume (or restart) playback on the player.
         """
+        self.logger.info("Resuming playback on player %s", player_id)
         player = self._get_player_with_redirect(player_id)
         source = source or player.active_source
         media = media or player.current_media

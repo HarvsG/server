@@ -217,6 +217,7 @@ class AirPlayPlayer(Player):
         self._attr_active_source = media.source_id
         self._attr_current_media = media
 
+        self.logger.info("PlayerID: %s,  Airplay.play_media", self.player_id)
         # select audio source
         if media.media_type == MediaType.ANNOUNCEMENT:
             # special case: stream announcement
@@ -272,11 +273,14 @@ class AirPlayPlayer(Player):
 
         # if an existing stream session is running, we could replace it with the new stream
         if self.raop_stream and self.raop_stream.running:
+            self.logger.info("player.py - 0")
             # check if we need to replace the stream
             if self.raop_stream.prevent_playback:
                 # player is in prevent playback mode, we need to stop the stream
+                self.logger.info("player.py - 1: stop")
                 await self.stop()
             else:
+                self.logger.info("player.py - 2: replace_stream")
                 await self.raop_stream.session.replace_stream(audio_source)
                 return
 
@@ -284,6 +288,11 @@ class AirPlayPlayer(Player):
         sync_clients = self._get_sync_clients()
         provider = cast("AirPlayProvider", self.provider)
         raop_stream_session = RaopStreamSession(provider, sync_clients, input_format, audio_source)
+        self.logger.info(
+            "Starting RAOP stream session for player %s, synclients: %s",
+            self.player_id,
+            sync_clients,
+        )
         await raop_stream_session.start()
 
     async def volume_set(self, volume_level: int) -> None:
