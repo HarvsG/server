@@ -67,7 +67,9 @@ class RaopStreamSession:
         async def _start_client(raop_player: AirPlayPlayer) -> None:
             # stop existing stream if running
             if raop_player.raop_stream and raop_player.raop_stream.running:
-                raop_player.logger.info("raop.py - raop_player.raop_stream.stop()")
+                raop_player.logger.info(
+                    "raop.py - raop_player.raop_stream.stop(): %s", raop_player.display_name
+                )
                 await raop_player.raop_stream.stop()
 
             raop_player.raop_stream = RaopStream(self, raop_player)
@@ -112,9 +114,9 @@ class RaopStreamSession:
         # temp solution: just restart the whole playback session when new client(s) join
         sync_leader = self.sync_clients[0]
         airplay_player.logger.info(
-            "Added Player ID: %s, Sync_Leader ID: %s",
-            airplay_player.player_id,
-            sync_leader.player_id,
+            "Added Player: %s, Sync_Leader: %s",
+            airplay_player.display_name,
+            sync_leader.display_name,
         )
         if not sync_leader.raop_stream or not sync_leader.raop_stream.running:
             airplay_player.logger.warning("Cannot add client, sync leader has no active stream")
@@ -124,7 +126,6 @@ class RaopStreamSession:
         # this could potentially be called by multiple players at the exact same time
         # so we debounce the resync a bit here with a timer
         if sync_leader.current_media:
-            airplay_player.logger.info("Scheduling call_later > resume")
             self.mass.call_later(
                 0.5,
                 self.mass.players.cmd_resume(sync_leader.player_id),

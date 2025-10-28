@@ -392,6 +392,9 @@ class PlayerController(CoreController):
                 await player.play()
         else:
             # try to resume the player
+            self.logger.info(
+                "PlayerController.cmd_play: attempting resume on player %s", player.display_name
+            )
             await self.cmd_resume(player.player_id)
 
     @api_command("players/cmd/pause")
