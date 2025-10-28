@@ -463,9 +463,11 @@ class PlayerController(CoreController):
         media = media or player.current_media
         # power on the player if needed
         if not player.powered and player.power_control != PLAYER_CONTROL_NONE:
+            self.logger.info("PlayerController.cmd_resume: 0")
             await self.cmd_power(player.player_id, True)
         # Redirect to queue controller if it is active
         if active_queue := self.mass.player_queues.get(source or player_id):
+            self.logger.info("PlayerController.cmd_resume: 1")
             await self.mass.player_queues.resume(active_queue.queue_id)
             return
         # try to handle command on player directly
@@ -477,16 +479,20 @@ class PlayerController(CoreController):
             and active_source.can_play_pause
         ):
             # player has some other source active and native resume support
+            self.logger.info("PlayerController.cmd_resume: 2")
             await player.play()
             return
         if active_source and not active_source.passive:
+            self.logger.info("PlayerController.cmd_resume: 3")
             await player.select_source(active_source.id)
             return
         if media:
             # try to re-play the current media item
+            self.logger.info("PlayerController.cmd_resume: 4")
             await player.play_media(media)
             return
         # fallback: just send play command - which will fail if nothing can be played
+        self.logger.info("PlayerController.cmd_resume: 5")
         await player.play()
 
     @api_command("players/cmd/seek")
