@@ -124,7 +124,7 @@ class RaopStreamSession:
         # this could potentially be called by multiple players at the exact same time
         # so we debounce the resync a bit here with a timer
         if sync_leader.current_media:
-            airplay_player.logger.info("Scheduling call_later")
+            airplay_player.logger.info("Scheduling call_later > resume")
             self.mass.call_later(
                 0.5,
                 self.mass.players.cmd_resume(sync_leader.player_id),
