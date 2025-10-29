@@ -278,8 +278,12 @@ class AirPlayProvider(PlayerProvider):
                 player.update_volume_from_device(volume)
             elif "device-prevent-playback=1" in path:
                 # device switched to another source (or is powered off)
+                self.logger.info(
+                    "Device preventing playback: %s. Path: %s", player.display_name, path
+                )
                 if raop_stream := player.raop_stream:
                     raop_stream.prevent_playback = True
+                    self.logger.info("Set prevent_playback=True for %s", player.display_name)
                     self.mass.create_task(player.raop_stream.session.remove_client(player))
             elif "device-prevent-playback=0" in path:
                 # device reports that its ready for playback again
