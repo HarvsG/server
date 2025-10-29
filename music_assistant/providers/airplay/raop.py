@@ -125,9 +125,14 @@ class RaopStreamSession:
         await self.stop()  # we need to stop the current session to add a new client
         # this could potentially be called by multiple players at the exact same time
         # so we debounce the resync a bit here with a timer
+        # NOTE: We use a 2 second delay here because Sonos speakers (and potentially other
+        # AirPlay devices) refuse new connections if they come too quickly after closing
+        # a previous connection. This prevents a race condition where the master player
+        # (often a Sonos speaker) stops accepting audio frames while child players continue
+        # playing normally.
         if sync_leader.current_media:
             self.mass.call_later(
-                0.5,
+                2.0,
                 self.mass.players.cmd_resume(sync_leader.player_id),
                 task_id=f"resync_session_{sync_leader.player_id}",
             )
