@@ -184,6 +184,27 @@ class RaopStreamSession:
                                 chunk_count,
                                 excluded,
                             )
+                            # Log detailed reason WHY each client was excluded
+                            for client in self.sync_clients:
+                                if client not in sync_clients:
+                                    if not client.raop_stream:
+                                        self.prov.logger.warning(
+                                            "  %s: raop_stream is None", client.display_name
+                                        )
+                                    elif client.raop_stream:
+                                        stream = client.raop_stream
+                                        self.prov.logger.warning(
+                                            "  %s: running=%s (_stopped=%s, _started.is_set=%s, "
+                                            "_cliraop_proc=%s, _cliraop_proc.closed=%s)",
+                                            client.display_name,
+                                            stream.running,
+                                            stream._stopped,
+                                            stream._started.is_set(),
+                                            stream._cliraop_proc is not None,
+                                            stream._cliraop_proc.closed
+                                            if stream._cliraop_proc
+                                            else "N/A",
+                                        )
 
                     await asyncio.gather(
                         *[x.raop_stream.write_chunk(chunk) for x in sync_clients if x.raop_stream],
@@ -350,6 +371,19 @@ class RaopStream:
 
     async def stop(self) -> None:
         """Stop playback and cleanup."""
+        # Log when stop is called
+        import traceback
+
+        stack_summary = traceback.extract_stack()
+        caller_info = stack_summary[-2] if len(stack_summary) >= 2 else None
+        self.player.logger.info(
+            "RaopStream.stop called for player %s (caller: %s:%s in %s)",
+            self.player.display_name,
+            caller_info.filename.split("/")[-1] if caller_info else "unknown",
+            caller_info.lineno if caller_info else "?",
+            caller_info.name if caller_info else "unknown",
+        )
+
         await self.send_cli_command("ACTION=STOP")
         self._stopped = True
         if self._stderr_reader_task and not self._stderr_reader_task.done():
@@ -537,6 +571,21 @@ class RaopStream:
                 logger.debug("End of stream reached")
                 break
             logger.log(VERBOSE_LOG_LEVEL, line)
+
+        # Log when stderr reader exits
+        if self._cliraop_proc:
+            returncode = self._cliraop_proc.returncode
+            logger.warning(
+                "_stderr_reader: cliraop process ended for player %s (returncode: %s, closed: %s)",
+                self.player.display_name,
+                returncode,
+                self._cliraop_proc.closed,
+            )
+        else:
+            logger.warning(
+                "_stderr_reader: exiting but _cliraop_proc is None for player %s",
+                self.player.display_name,
+            )
 
         # ensure we're cleaned up afterwards (this also logs the returncode)
         await self.stop()
