@@ -125,14 +125,9 @@ class RaopStreamSession:
         await self.stop()  # we need to stop the current session to add a new client
         # this could potentially be called by multiple players at the exact same time
         # so we debounce the resync a bit here with a timer
-        # NOTE: We use a 2 second delay here because Sonos speakers (and potentially other
-        # AirPlay devices) refuse new connections if they come too quickly after closing
-        # a previous connection. This prevents a race condition where the master player
-        # (often a Sonos speaker) stops accepting audio frames while child players continue
-        # playing normally.
         if sync_leader.current_media:
             self.mass.call_later(
-                2.0,
+                0.5,
                 self.mass.players.cmd_resume(sync_leader.player_id),
                 task_id=f"resync_session_{sync_leader.player_id}",
             )
@@ -159,6 +154,7 @@ class RaopStreamSession:
     async def _audio_streamer(self) -> None:
         """Stream audio to all players."""
         generator_exhausted = False
+        chunk_count = 0
         try:
             async for chunk in self._audio_source:
                 async with self._lock:
@@ -167,6 +163,28 @@ class RaopStreamSession:
                     ]
                     if not sync_clients:
                         return
+
+                    # Log which clients are receiving chunks
+                    chunk_count += 1
+                    if chunk_count == 1 or chunk_count % 100 == 0:
+                        client_names = [x.display_name for x in sync_clients]
+                        self.prov.logger.info(
+                            "Audio chunk %d: streaming to %d clients: %s",
+                            chunk_count,
+                            len(sync_clients),
+                            client_names,
+                        )
+                        # Also log clients that are NOT receiving chunks
+                        if len(sync_clients) < len(self.sync_clients):
+                            excluded = [
+                                x.display_name for x in self.sync_clients if x not in sync_clients
+                            ]
+                            self.prov.logger.warning(
+                                "Audio chunk %d: clients excluded (not running): %s",
+                                chunk_count,
+                                excluded,
+                            )
+
                     await asyncio.gather(
                         *[x.raop_stream.write_chunk(chunk) for x in sync_clients if x.raop_stream],
                         return_exceptions=True,
@@ -267,6 +285,9 @@ class RaopStream:
         )
         # ffmpeg handles the player specific stream + filters and pipes
         # audio to the cliraop process
+        self.player.logger.info(
+            "RaopStream.start: starting ffmpeg stream for player %s", self.player.display_name
+        )
         self.start_ffmpeg_stream()
 
         # cliraop is the binary that handles the actual raop streaming to the player
@@ -299,12 +320,22 @@ class RaopStream:
         ]
         self._cliraop_proc = AsyncProcess(cliraop_args, stdin=True, stderr=True, name="cliraop")
         await self._cliraop_proc.start()
+
+        self.player.logger.info(
+            "RaopStream.start: cliraop process started for player %s, waiting for connection",
+            self.player.display_name,
+        )
+
         # read first 20 lines of stderr to get the initial status
         for _ in range(20):
             line = (await self._cliraop_proc.read_stderr()).decode("utf-8", errors="ignore")
             self.player.logger.debug(line)
             if "connected to " in line:
                 self._started.set()
+                self.player.logger.info(
+                    "RaopStream.start: stream marked as STARTED for player %s",
+                    self.player.display_name,
+                )
                 break
             if "Cannot connect to AirPlay device" in line:
                 if self._ffmpeg_reader_task:
@@ -335,8 +366,25 @@ class RaopStream:
         """Write a (pcm) audio chunk."""
         if self._stopped:
             raise RuntimeError("Stream is already stopped")
+
+        # Log waiting for stream to be ready
+        if not self._started.is_set():
+            self.player.logger.debug(
+                "write_chunk: waiting for stream to be ready (player: %s)",
+                self.player.display_name,
+            )
+
         await self._started.wait()
         assert self._ffmpeg_proc
+
+        # Log first chunk write
+        if self._stream_bytes_sent == 0:
+            self.player.logger.info(
+                "write_chunk: writing FIRST chunk to ffmpeg (player: %s, size: %d bytes)",
+                self.player.display_name,
+                len(chunk),
+            )
+
         await self._ffmpeg_proc.write(chunk)
 
     async def write_eof(self) -> None:
@@ -390,15 +438,39 @@ class RaopStream:
         )
         self._stream_bytes_sent = 0
         await self._ffmpeg_proc.start()
+
+        # Log ffmpeg start
+        self.player.logger.info(
+            "_ffmpeg_reader: ffmpeg started for player %s", self.player.display_name
+        )
+
         chunksize = get_chunksize(AIRPLAY_PCM_FORMAT)
         # wait for cliraop to be ready
         await asyncio.wait_for(self._started.wait(), 20)
+
+        # Log that we're about to start reading from ffmpeg
+        self.player.logger.info(
+            "_ffmpeg_reader: starting to read from ffmpeg and write to cliraop (player: %s)",
+            self.player.display_name,
+        )
+
+        chunk_count = 0
         async for chunk in self._ffmpeg_proc.iter_chunked(chunksize):
             if self._stopped:
                 break
             if not self._cliraop_proc or self._cliraop_proc.closed:
                 break
+
+            # Log first chunk to cliraop
+            if chunk_count == 0:
+                self.player.logger.info(
+                    "_ffmpeg_reader: writing FIRST chunk to cliraop stdin (player: %s, size: %d bytes)",
+                    self.player.display_name,
+                    len(chunk),
+                )
+
             await self._cliraop_proc.write(chunk)
+            chunk_count += 1
             self._stream_bytes_sent += len(chunk)
             self._total_bytes_sent += len(chunk)
             del chunk
@@ -407,6 +479,14 @@ class RaopStream:
             self.player.set_state_from_raop(
                 elapsed_time=self._stream_bytes_sent / chunksize,
             )
+
+        # Log when ffmpeg reader ends
+        self.player.logger.info(
+            "_ffmpeg_reader: finished reading from ffmpeg (player: %s, total chunks: %d)",
+            self.player.display_name,
+            chunk_count,
+        )
+
         # if we reach this point, the process exited, most likely because the stream ended
         if self._cliraop_proc and not self._cliraop_proc.closed:
             await self._cliraop_proc.write_eof()
