@@ -433,7 +433,7 @@ class MetaDataController(CoreController):
         if "%" in path:
             # assume (double) encoded url, decode it
             path = urllib.parse.unquote_plus(path)
-        with suppress(FileNotFoundError):
+        try:
             image_data = await self.get_thumbnail(
                 path, size=size, provider=provider, image_format=image_format
             )
@@ -444,7 +444,18 @@ class MetaDataController(CoreController):
                 headers={"Cache-Control": "max-age=31536000", "Access-Control-Allow-Origin": "*"},
                 content_type=f"image/{image_format}",
             )
-        return web.Response(status=404)
+        except FileNotFoundError:
+            self.logger.debug("Image not found: provider=%s, path=%s", provider, path)
+            return web.Response(status=404)
+        except Exception as err:
+            self.logger.warning(
+                "Error fetching image from imageproxy: provider=%s, path=%s, error=%s",
+                provider,
+                path,
+                str(err),
+                exc_info=err if self.logger.isEnabledFor(10) else None,
+            )
+            return web.Response(status=404)
 
     async def create_collage_image(
         self,
