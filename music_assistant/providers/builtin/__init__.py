@@ -181,13 +181,16 @@ class BuiltinProvider(MusicProvider):
             # always prefer the stored info, such as the name
             parsed_item.name = stored_item["name"]
             if image_url := stored_item.get("image_url"):
-                parsed_item.metadata.add_image(
-                    MediaItemImage(
-                        type=ImageType.THUMB,
-                        path=image_url,
-                        provider=self.domain,
-                        remotely_accessible=image_url.startswith("http"),
-                    )
+                # Replace any auto-detected images (e.g., embedded artwork) with the custom icon
+                parsed_item.metadata.images = UniqueList(
+                    [
+                        MediaItemImage(
+                            type=ImageType.THUMB,
+                            path=image_url,
+                            provider=self.domain,
+                            remotely_accessible=image_url.startswith("http"),
+                        )
+                    ]
                 )
         return parsed_item
 
